@@ -1,0 +1,864 @@
+{
+  "name": "buz-propaga",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "p2/business-profile/sync",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -576,
+        32
+      ],
+      "id": "a5757482-dcfb-4d25-8f5f-7a56d9e530c1",
+      "name": "Webhook",
+      "webhookId": "ccaa630c-4d11-400b-b029-7cb181937d4f"
+    },
+    {
+      "parameters": {
+        "jsCode": "// DEBUG: Ver o que está chegando\nconst input = $input.all()[0];\nconsole.log('INPUT COMPLETO:', JSON.stringify(input, null, 2));\n\nconst payload = input.json.body || input.json || {};  // ← AQUI! Mudança crítica\nconsole.log('PAYLOAD:', JSON.stringify(payload, null, 2));\n\n// Required fields check\nconst required = [\n  'name', \n  'phone_primary', \n  'address_street', \n  'address_city', \n  'address_state', \n  'address_zip',\n  'channels'\n];\n\nconst missing = required.filter(field => !payload[field]);\n\nif (missing.length > 0) {\n  throw new Error(`Missing required fields: ${missing.join(', ')}. Payload recebido: ${JSON.stringify(payload)}`);\n}\n\n// Normalize phone (remove non-digits except +)\nif (payload.phone_primary) {\n  payload.phone_primary = payload.phone_primary.replace(/[^\\d+]/g, '');\n}\n\nif (payload.phone_whatsapp) {\n  payload.phone_whatsapp = payload.phone_whatsapp.replace(/[^\\d+]/g, '');\n}\n\n// Normalize CEP (remove hyphen)\nif (payload.address_zip) {\n  payload.address_zip = payload.address_zip.replace('-', '');\n}\n\n// Add metadata\npayload.processed_at = new Date().toISOString();\npayload.sync_id = `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;\n\nreturn [payload];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        32
+      ],
+      "id": "bbdae8b3-9493-4c56-a786-96c38b0f7cf2",
+      "name": "Function - Validate Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split into separate items for each channel\nconst payload = $input.all()[0].json;\nconst channels = payload.channels;\n\nconst items = channels.map(channel => ({\n  json: {\n    ...payload,\n    current_channel: channel,\n    channel_start_time: Date.now()\n  }\n}));\n\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        32
+      ],
+      "id": "3418e75a-8a42-4df4-a297-a01579bd0b42",
+      "name": "Function - Prepare Channel Routing"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.current_channel }}",
+                    "rightValue": "google",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "21388eb6-9f78-4fbf-b649-20f3b138f4ff"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "130005fe-528d-408d-aabe-7cfb4a301c92",
+                    "leftValue": "={{ $json.current_channel }}",
+                    "rightValue": "facebook",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "50ccc2cd-7853-4ab5-8414-bb6e1bcbfaa7",
+                    "leftValue": "={{ $json.current_channel }}",
+                    "rightValue": "apple",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "59d80c27-5f60-43fc-97dd-96e21a210dab",
+                    "leftValue": "={{ $json.current_channel }}",
+                    "rightValue": "={{ !['google', 'facebook', 'apple'].includes($json.current_channel) }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEmpty",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        528,
+        16
+      ],
+      "id": "84dc1fa9-e778-4461-ae30-94e95f74cea7",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pegar resposta HTTP\nconst httpResponse = $input.all()[0].json;\nconst statusCode = httpResponse.statusCode || 200;\n\n// Pegar dados originais do node anterior (Prepare Google Payload)\nconst originalData = $('Function - Prepare Google Payload').all()[0].json;\n\n// Calcular duração\nconst duration = originalData.channel_start_time \n  ? Date.now() - originalData.channel_start_time \n  : 0;\n\nreturn [{\n  json: {\n    sync_id: originalData.sync_id,\n    profile_id: originalData.id,\n    channel: 'google',\n    status: statusCode < 300 ? 'success' : 'error',\n    status_code: statusCode,\n    message: statusCode < 300 ? 'Synced successfully' : 'Sync failed',\n    duration_ms: duration,\n    created_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -256
+      ],
+      "id": "bf67112c-add5-4094-9132-572eae00808b",
+      "name": "Function - Process Google Response"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://mybusinessbusinessinformation.googleapis.com/v1/{{ $json.location_id }}?updateMask=title,phoneNumbers,storefrontAddress,websiteUri",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"languageCode\": \"pt-BR\",\n  \"title\": \"{{ $json.name }}\",\n  \"phoneNumbers\": {\n    \"primaryPhone\": \"{{ $json.phone_primary }}\"\n  },\n  \"storefrontAddress\": {\n    \"addressLines\": [\"{{ $json.address_street }}, {{ $json.address_number }}\"],\n    \"locality\": \"{{ $json.address_city }}\",\n    \"administrativeArea\": \"{{ $json.address_state }}\",\n    \"postalCode\": \"{{ $json.address_zip }}\",\n    \"regionCode\": \"BR\"\n  },\n  \"websiteUri\": \"{{ $json.website }}\"\n}",
+        "options": {
+          "allowUnauthorizedCerts": false,
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1168,
+        -256
+      ],
+      "id": "543aa8a4-b45e-4634-b6fa-07ab176db3ce",
+      "name": "HTTP Request - Google API (Mock)",
+      "credentials": {
+        "googleAdsOAuth2Api": {
+          "id": "huSkpf6OY7RNONOl",
+          "name": "Google Ads account"
+        },
+        "googleBusinessProfileOAuth2Api": {
+          "id": "5igdUXdVK0NEyRuT",
+          "name": "Google Business Profile account"
+        },
+        "googleOAuth2Api": {
+          "id": "ghltJq8NmRaOO8SM",
+          "name": "Google account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Apenas passa os dados, não monta payload completo\nconst data = $input.all()[0].json;\n\nreturn [{\n  json: {\n    ...data,\n    location_id: data.gbp_location_id || 'accounts/YOUR_ACCOUNT_ID/locations/YOUR_LOCATION_ID'\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        -256
+      ],
+      "id": "c0a1c1da-81eb-4a17-9abc-5477f20f01b1",
+      "name": "Function - Prepare Google Payload"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.all()[0].json;\n\n// Gerar store_number numérico único (hash do external_id)\nconst hashCode = (str) => {\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash; // Convert to 32bit integer\n  }\n  return Math.abs(hash);\n};\n\nconst storeNumber = hashCode(data.external_id || data.id);\n\nreturn [{\n  json: {\n    ...data,\n    fb_store_number: storeNumber\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        0
+      ],
+      "id": "1d700dbc-4b01-4055-8086-06d6860e1149",
+      "name": "Function - Prepare Facebook Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.facebook_page_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "facebookGraphApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=about",
+              "value": "={{ $json.description || \"Informações da empresa\" }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.phone_primary }}"
+            },
+            {
+              "name": "website",
+              "value": "={{ $json.website }}"
+            },
+            {
+              "name": "location[street]",
+              "value": "={{ $json.address_street }}, {{ $json.address_number }}"
+            },
+            {
+              "name": "location[city]",
+              "value": "={{ $json.address_city }}"
+            },
+            {
+              "name": "location[state]",
+              "value": "={{ $json.address_state }}"
+            },
+            {
+              "name": "location[country]",
+              "value": "BR"
+            },
+            {
+              "name": "location[zip]",
+              "value": "={{ $json.address_zip }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1168,
+        0
+      ],
+      "id": "1792eceb-a29c-40be-8db4-49a507dd8a76",
+      "name": "HTTP Request - Facebook API",
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "XeTy2s2DxeGJyNwX",
+          "name": "Graph API Meta - Page"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.all()[0].json;\n\nreturn [{\n  json: {\n    ...data,\n    apple_location_id: data.apple_location_id || 'NEW' // Se NEW, usa POST em vez de PUT\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        288
+      ],
+      "id": "7c7b63ab-9284-4598-8ff0-254556170402",
+      "name": "Function - Prepare Apple Payload"
+    },
+    {
+      "parameters": {
+        "jsCode": "const httpResponse = $input.all()[0].json;\nconst statusCode = httpResponse.statusCode || 201;\n\nconst originalData = $('Function - Prepare Facebook Payload').all()[0].json;\n\nconst duration = originalData.channel_start_time \n  ? Date.now() - originalData.channel_start_time \n  : 0;\n\nreturn [{\n  json: {\n    sync_id: originalData.sync_id,\n    profile_id: originalData.id,\n    channel: 'facebook',\n    status: statusCode < 300 ? 'success' : 'error',\n    status_code: statusCode,\n    message: statusCode < 300 ? 'Location created' : 'Creation failed',\n    duration_ms: duration,\n    created_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ],
+      "id": "3c4afb13-45de-4644-a987-c70968b3f9aa",
+      "name": "Function - Process Facebook Response"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://businessconnect.apple.com/api/v1/locations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"{{ $json.name }}\",\n  \"address\": {\n    \"addressLines\": [\"{{ $json.address_street }}, {{ $json.address_number }}\"],\n    \"locality\": \"{{ $json.address_city }}\",\n    \"administrativeArea\": \"{{ $json.address_state }}\",\n    \"postalCode\": \"{{ $json.address_zip }}\",\n    \"country\": \"BR\"\n  },\n  \"phoneNumber\": \"{{ $json.phone_primary }}\",\n  \"url\": \"{{ $json.website }}\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1168,
+        288
+      ],
+      "id": "b2a4b547-417a-492b-8bb3-a7195be82133",
+      "name": "HTTP Request - Apple"
+    },
+    {
+      "parameters": {
+        "jsCode": "const httpResponse = $input.all()[0].json;\nconst statusCode = httpResponse.statusCode || 201;\n\nconst originalData = $('Function - Prepare Apple Payload').all()[0].json;\n\nconst duration = originalData.channel_start_time \n  ? Date.now() - originalData.channel_start_time \n  : 0;\n\nreturn [{\n  json: {\n    sync_id: originalData.sync_id,\n    profile_id: originalData.id,\n    channel: 'apple',\n    status: statusCode < 300 ? 'success' : 'error',\n    status_code: statusCode,\n    message: statusCode < 300 ? 'Location created' : 'Creation failed',\n    duration_ms: duration,\n    created_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        288
+      ],
+      "id": "a1061140-ab44-4429-9cf4-8470f04a8c69",
+      "name": "Function - Process Apple Response"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1856,
+        -16
+      ],
+      "id": "e7e7ec64-c9f2-466b-bd3c-ce71d21ebc81",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "tableId": "sync_logs",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "sync_id",
+              "fieldValue": "={{ $json.sync_id }}"
+            },
+            {
+              "fieldId": "profile_id",
+              "fieldValue": "={{ $json.profile_id }}"
+            },
+            {
+              "fieldId": "channel",
+              "fieldValue": "={{ $json.channel }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "={{ $json.status }}"
+            },
+            {
+              "fieldId": "status_code",
+              "fieldValue": "={{ $json.status_code }}"
+            },
+            {
+              "fieldId": "message",
+              "fieldValue": "={{ $json.message }}"
+            },
+            {
+              "fieldId": "duration_ms",
+              "fieldValue": "={{ $json.duration_ms }}"
+            },
+            {
+              "fieldId": "created_at",
+              "fieldValue": "={{ $json.created_at }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2112,
+        16
+      ],
+      "id": "df6c75ec-0944-48dc-9bd6-219f45f802db",
+      "name": "Supabase - Insert Logs",
+      "credentials": {
+        "supabaseApi": {
+          "id": "YykvaREMprU01EYq",
+          "name": "gmn-listing"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst results = items.reduce((acc, item) => {\n  const channel = item.json.channel;\n  acc[channel] = {\n    status: item.json.status,\n    statusCode: item.json.status_code,\n    message: item.json.message,\n    durationMs: item.json.duration_ms\n  };\n  return acc;\n}, {});\n\n// ✅ Aceitar 'success' OU 'sent'\nconst allSuccess = items.every(item => \n  item.json.status === 'success' || item.json.status === 'sent'\n);\n\nreturn [{\n  json: {\n    success: allSuccess,\n    sync_id: items[0].json.sync_id,\n    timestamp: new Date().toISOString(),\n    results: results\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2368,
+        16
+      ],
+      "id": "31ee974e-3e8f-464b-9839-42407541cad3",
+      "name": "Function - Format Final Response"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2624,
+        16
+      ],
+      "id": "faca4d21-b01f-457e-84a5-b3279f73b54c",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.all()[0].json;\nconst channel = data.current_channel;\n\n// Base de dados completa de diretórios\nconst directories = {\n  \n  // ========== BRASIL ==========\n  \n  'apontador': {\n    name: 'Apontador',\n    country: 'BR',\n    email: 'cadastro@apontador.com.br',\n    subject: 'Solicitação de Cadastro/Atualização - {name}',\n    language: 'pt-BR'\n  },\n  \n  'guiamais': {\n    name: 'Guia Mais',\n    country: 'BR',\n    email: 'contato@guiamais.com.br',\n    subject: 'Inclusão de Empresa no Guia Mais - {name}',\n    language: 'pt-BR'\n  },\n  \n  'telelistas': {\n    name: 'Telelistas',\n    country: 'BR',\n    email: 'cadastro@telelistas.net',\n    subject: 'Cadastro Comercial - {name}',\n    language: 'pt-BR'\n  },\n  \n  'acheiaqui': {\n    name: 'Achei Aqui',\n    country: 'BR',\n    email: 'contato@acheiaqui.com.br',\n    subject: 'Solicitação de Cadastro - {name}',\n    language: 'pt-BR'\n  },\n  \n  'saipos': {\n    name: 'Saipos',\n    country: 'BR',\n    email: 'comercial@saipos.com',\n    subject: 'Cadastro de Estabelecimento - {name}',\n    language: 'pt-BR'\n  },\n  \n  'encontrabrasil': {\n    name: 'Encontra Brasil',\n    country: 'BR',\n    email: 'cadastro@encontrabrasil.com.br',\n    subject: 'Inclusão no Guia Comercial - {name}',\n    language: 'pt-BR'\n  },\n  \n  'guiasp': {\n    name: 'Guia SP',\n    country: 'BR',\n    email: 'cadastro@guiasp.com.br',\n    subject: 'Cadastro de Empresa - {name}',\n    language: 'pt-BR'\n  },\n  \n  'ifood': {\n    name: 'iFood',\n    country: 'BR',\n    email: 'restaurantes@ifood.com.br',\n    subject: 'Parceria Comercial - {name}',\n    language: 'pt-BR'\n  },\n  \n  'rappi': {\n    name: 'Rappi',\n    country: 'BR',\n    email: 'restaurantes@rappi.com.br',\n    subject: 'Cadastro de Restaurante - {name}',\n    language: 'pt-BR'\n  },\n  \n  'getninjas': {\n    name: 'GetNinjas',\n    country: 'BR',\n    email: 'profissionais@getninjas.com.br',\n    subject: 'Cadastro de Profissional/Empresa - {name}',\n    language: 'pt-BR'\n  },\n  \n  'habitissimo': {\n    name: 'Habitissimo',\n    country: 'BR',\n    email: 'profissionais@habitissimo.com.br',\n    subject: 'Cadastro Profissional - {name}',\n    language: 'pt-BR'\n  },\n  \n  'vivareal': {\n    name: 'Viva Real',\n    country: 'BR',\n    email: 'anunciantes@vivareal.com.br',\n    subject: 'Cadastro de Anunciante - {name}',\n    language: 'pt-BR'\n  },\n  \n  'zapimoveis': {\n    name: 'ZAP Imóveis',\n    country: 'BR',\n    email: 'anuncie@zapimoveis.com.br',\n    subject: 'Cadastro Imobiliária - {name}',\n    language: 'pt-BR'\n  },\n  \n  'doctoralia': {\n    name: 'Doctoralia',\n    country: 'BR',\n    email: 'medicos@doctoralia.com.br',\n    subject: 'Cadastro Profissional de Saúde - {name}',\n    language: 'pt-BR'\n  },\n  \n  'consultaremedios': {\n    name: 'Consulta Remédios',\n    country: 'BR',\n    email: 'farmacias@consultaremedios.com.br',\n    subject: 'Cadastro de Farmácia - {name}',\n    language: 'pt-BR'\n  },\n  \n  'booking': {\n    name: 'Booking.com',\n    country: 'GLOBAL',\n    email: 'partner.help@booking.com',\n    subject: 'Property Registration - {name}',\n    language: 'en-US'\n  },\n  \n  'tripadvisor': {\n    name: 'TripAdvisor',\n    country: 'GLOBAL',\n    email: 'ownercenter@tripadvisor.com',\n    subject: 'Business Listing Request - {name}',\n    language: 'en-US'\n  },\n  \n  // ========== GLOBAL ==========\n  \n  'bing': {\n    name: 'Bing Places',\n    country: 'GLOBAL',\n    email: 'placesfeedback@microsoft.com',\n    subject: 'Business Listing Submission - {name}',\n    language: 'en-US'\n  },\n  \n  'here': {\n    name: 'HERE WeGo',\n    country: 'GLOBAL',\n    email: 'mapfeedback@here.com',\n    subject: 'Business Location Update - {name}',\n    language: 'en-US'\n  },\n  \n  'tomtom': {\n    name: 'TomTom',\n    country: 'GLOBAL',\n    email: 'places@tomtom.com',\n    subject: 'Place Update Request - {name}',\n    language: 'en-US'\n  },\n  \n  'waze': {\n    name: 'Waze',\n    country: 'GLOBAL',\n    email: 'support@waze.com',\n    subject: 'Business Listing - {name}',\n    language: 'en-US'\n  },\n  \n  'mapquest': {\n    name: 'MapQuest',\n    country: 'GLOBAL',\n    email: 'feedback@mapquest.com',\n    subject: 'Business Data Update - {name}',\n    language: 'en-US'\n  },\n  \n  'yelp': {\n    name: 'Yelp',\n    country: 'GLOBAL',\n    email: 'restaurantsupport@yelp.com',\n    subject: 'Business Claim Request - {name}',\n    language: 'en-US'\n  },\n  \n  'foursquare': {\n    name: 'Foursquare',\n    country: 'GLOBAL',\n    email: 'support@foursquare.com',\n    subject: 'Venue Information Update - {name}',\n    language: 'en-US'\n  },\n  \n  'whitepages': {\n    name: 'Whitepages',\n    country: 'GLOBAL',\n    email: 'businesslistings@whitepages.com',\n    subject: 'Business Information Update - {name}',\n    language: 'en-US'\n  },\n  \n  'manta': {\n    name: 'Manta',\n    country: 'GLOBAL',\n    email: 'hello@manta.com',\n    subject: 'Business Profile Update - {name}',\n    language: 'en-US'\n  },\n  \n  'opentable': {\n    name: 'OpenTable',\n    country: 'GLOBAL',\n    email: 'restaurants@opentable.com',\n    subject: 'Restaurant Partnership Inquiry - {name}',\n    language: 'en-US'\n  },\n  \n  'zomato': {\n    name: 'Zomato',\n    country: 'GLOBAL',\n    email: 'restaurant@zomato.com',\n    subject: 'Restaurant Listing Request - {name}',\n    language: 'en-US'\n  },\n  \n  'houzz': {\n    name: 'Houzz',\n    country: 'GLOBAL',\n    email: 'pro@houzz.com',\n    subject: 'Professional Profile Request - {name}',\n    language: 'en-US'\n  },\n  \n  'angieslist': {\n    name: \"Angie's List\",\n    country: 'GLOBAL',\n    email: 'businessowners@angieslist.com',\n    subject: 'Service Provider Listing - {name}',\n    language: 'en-US'\n  },\n  \n  'homeadvisor': {\n    name: 'HomeAdvisor',\n    country: 'GLOBAL',\n    email: 'prosupport@homeadvisor.com',\n    subject: 'Pro Registration - {name}',\n    language: 'en-US'\n  }\n};\n\n// Verificar se canal existe\nif (!directories[channel]) {\n  throw new Error(`Directory ${channel} not configured for email submission`);\n}\n\nconst dir = directories[channel];\n\n// Preparar dados do email\nreturn [{\n  json: {\n    ...data,\n    directory_name: dir.name,\n    directory_country: dir.country,\n    email_to: dir.email,\n    email_subject: dir.subject.replace('{name}', data.name),\n    email_language: dir.language\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        576
+      ],
+      "id": "d04d7247-80c0-4dbe-af5f-e8efbc26c060",
+      "name": "Function - Email Directory Router"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.all()[0].json;\nconst lang = data.email_language;\n\n// Templates por idioma\nconst templates = {\n  'pt-BR': generatePortugueseEmail,\n  'en-US': generateEnglishEmail\n};\n\nconst emailBody = templates[lang](data);\n\nreturn [{\n  json: {\n    ...data,\n    email_body_html: emailBody\n  }\n}];\n\n// ========== TEMPLATE PORTUGUÊS ==========\nfunction generatePortugueseEmail(data) {\n  return `\n<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #4285f4; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }\n    .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }\n    .section { margin-bottom: 20px; background: white; padding: 15px; border-radius: 4px; }\n    .label { font-weight: bold; color: #555; }\n    .value { margin-left: 10px; }\n    .footer { text-align: center; padding: 20px; font-size: 12px; color: #777; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h2>Solicitação de Cadastro/Atualização</h2>\n      <p>${data.directory_name}</p>\n    </div>\n    \n    <div class=\"content\">\n      <p>Prezados,</p>\n      \n      <p>Solicito a inclusão ou atualização dos dados da seguinte empresa em sua plataforma:</p>\n      \n      <div class=\"section\">\n        <h3>📋 Dados da Empresa</h3>\n        <p><span class=\"label\">Nome:</span><span class=\"value\">${data.name}</span></p>\n        <p><span class=\"label\">Telefone:</span><span class=\"value\">${data.phone_primary}</span></p>\n        ${data.phone_whatsapp ? `<p><span class=\"label\">WhatsApp:</span><span class=\"value\">${data.phone_whatsapp}</span></p>` : ''}\n        ${data.website ? `<p><span class=\"label\">Website:</span><span class=\"value\"><a href=\"${data.website}\">${data.website}</a></span></p>` : ''}\n        ${data.email ? `<p><span class=\"label\">Email:</span><span class=\"value\">${data.email}</span></p>` : ''}\n      </div>\n      \n      <div class=\"section\">\n        <h3>📍 Endereço</h3>\n        <p>\n          ${data.address_street}, ${data.address_number}<br>\n          ${data.address_complement ? data.address_complement + '<br>' : ''}\n          ${data.address_neighborhood ? data.address_neighborhood + '<br>' : ''}\n          ${data.address_city} - ${data.address_state}<br>\n          CEP: ${data.address_zip}\n        </p>\n      </div>\n      \n      ${data.description ? `\n      <div class=\"section\">\n        <h3>ℹ️ Descrição</h3>\n        <p>${data.description}</p>\n      </div>\n      ` : ''}\n      \n      ${data.business_hours ? `\n      <div class=\"section\">\n        <h3>🕒 Horário de Funcionamento</h3>\n        <p>${data.business_hours}</p>\n      </div>\n      ` : ''}\n      \n      <p>Aguardo confirmação da inclusão/atualização.</p>\n      \n      <p>\n        Atenciosamente,<br>\n        <strong>${data.owner_name || 'Equipe ' + data.name}</strong><br>\n        ${data.owner_email || data.email || ''}\n      </p>\n    </div>\n    \n    <div class=\"footer\">\n      <p>Email gerado automaticamente pelo sistema P² Local Listings</p>\n      <p>ID de Sincronização: ${data.sync_id}</p>\n    </div>\n  </div>\n</body>\n</html>\n  `;\n}\n\n// ========== TEMPLATE INGLÊS ==========\nfunction generateEnglishEmail(data) {\n  return `\n<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"UTF-8\">\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #4285f4; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }\n    .content { background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px; }\n    .section { margin-bottom: 20px; background: white; padding: 15px; border-radius: 4px; }\n    .label { font-weight: bold; color: #555; }\n    .value { margin-left: 10px; }\n    .footer { text-align: center; padding: 20px; font-size: 12px; color: #777; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h2>Business Listing Request</h2>\n      <p>${data.directory_name}</p>\n    </div>\n    \n    <div class=\"content\">\n      <p>Dear Team,</p>\n      \n      <p>I would like to request the inclusion or update of the following business information on your platform:</p>\n      \n      <div class=\"section\">\n        <h3>📋 Business Information</h3>\n        <p><span class=\"label\">Name:</span><span class=\"value\">${data.name}</span></p>\n        <p><span class=\"label\">Phone:</span><span class=\"value\">${data.phone_primary}</span></p>\n        ${data.website ? `<p><span class=\"label\">Website:</span><span class=\"value\"><a href=\"${data.website}\">${data.website}</a></span></p>` : ''}\n        ${data.email ? `<p><span class=\"label\">Email:</span><span class=\"value\">${data.email}</span></p>` : ''}\n      </div>\n      \n      <div class=\"section\">\n        <h3>📍 Address</h3>\n        <p>\n          ${data.address_street}, ${data.address_number}<br>\n          ${data.address_city}, ${data.address_state}<br>\n          ZIP: ${data.address_zip}<br>\n          Country: ${data.address_country || 'Brazil'}\n        </p>\n      </div>\n      \n      ${data.description ? `\n      <div class=\"section\">\n        <h3>ℹ️ Description</h3>\n        <p>${data.description}</p>\n      </div>\n      ` : ''}\n      \n      <p>Looking forward to your confirmation.</p>\n      \n      <p>\n        Best regards,<br>\n        <strong>${data.owner_name || data.name + ' Team'}</strong><br>\n        ${data.owner_email || data.email || ''}\n      </p>\n    </div>\n    \n    <div class=\"footer\">\n      <p>Automatically generated by P² Local Listings System</p>\n      <p>Sync ID: ${data.sync_id}</p>\n    </div>\n  </div>\n</body>\n</html>\n  `;\n}\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        576
+      ],
+      "id": "1121deb0-95a8-45d0-bf27-015c864a287a",
+      "name": "Function - Generate Email Body"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_to }}",
+        "subject": "={{ $json.email_subject }}",
+        "message": "={{ $json.email_body_html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1392,
+        576
+      ],
+      "id": "1614da76-39c7-469d-b68d-2ec3ac35130d",
+      "name": "Send a message",
+      "webhookId": "6ff27e8c-5f43-49e2-934d-df304876a00e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "nkBNOV7QjLKR70Pi",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.all()[0].json;\nconst originalData = $('Function - Email Directory Router').all()[0].json;\n\nconst statusCode = 200; // Email enviado com sucesso\nconst duration = originalData.channel_start_time \n  ? Date.now() - originalData.channel_start_time \n  : 0;\n\nreturn [{\n  json: {\n    sync_id: originalData.sync_id,\n    profile_id: originalData.id,\n    channel: originalData.current_channel,\n    status: 'sent',\n    status_code: statusCode,\n    message: `Email sent to ${originalData.directory_name}`,\n    duration_ms: duration,\n    created_at: new Date().toISOString(),\n    email_to: originalData.email_to,\n    directory_name: originalData.directory_name\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1648,
+        576
+      ],
+      "id": "5cd1a2d4-fde9-4e16-b671-144e352747b2",
+      "name": "Function - Process Email Response"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        256,
+        32
+      ],
+      "id": "5dab66ba-fd35-4b18-814f-691994638039",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        2912,
+        688
+      ],
+      "id": "28f1e7d8-e386-4871-9f4b-9e67f4ff12a4"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Function - Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Function - Prepare Channel Routing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Prepare Channel Routing": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Function - Prepare Google Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Function - Prepare Facebook Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Function - Prepare Apple Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Function - Email Directory Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Google API (Mock)": {
+      "main": [
+        [
+          {
+            "node": "Function - Process Google Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Prepare Google Payload": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Google API (Mock)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Prepare Facebook Payload": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Facebook API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Prepare Apple Payload": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Apple",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Facebook API": {
+      "main": [
+        [
+          {
+            "node": "Function - Process Facebook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Apple": {
+      "main": [
+        [
+          {
+            "node": "Function - Process Apple Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Process Apple Response": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Function - Process Google Response": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Process Facebook Response": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Insert Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Insert Logs": {
+      "main": [
+        [
+          {
+            "node": "Function - Format Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Format Final Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Email Directory Router": {
+      "main": [
+        [
+          {
+            "node": "Function - Generate Email Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Generate Email Body": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Function - Process Email Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function - Process Email Response": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0258455b-69f0-404e-939f-1549b24571d7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3e98ca8961fe56d44e997f71b655401c5a3fdf48f8b86366f7bf794b4166da67"
+  },
+  "id": "SRyC5VXdpE3uq28D",
+  "tags": []
+}
